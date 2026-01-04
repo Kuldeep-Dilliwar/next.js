@@ -465,14 +465,20 @@ jobs:
           name: turbo-run-summary-${{ matrix.settings.target }}
           path: .turbo/runs
 
-      - name: Get Next.js Version
+      - name: Get Target Version
         if: matrix.settings.target == 'aarch64-linux-android'
         id: get_version
         run: |
-          # Read version from package.json using Node
-          VERSION=$(node -p "require('./packages/next/package.json').version")
+          # Find the line with your Android dependency and extract just the version number
+          VERSION=$(grep '@next/swc-android-arm64' packages/next/package.json | head -n 1 | sed -E 's/.*: "(.*)".*/\1/')
+          
+          # Fallback: If it fails to find it (for safety), use "custom"
+          if [ -z "$VERSION" ]; then
+            VERSION="custom-build"
+          fi
+          
           echo "NEXT_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Detected Next.js version: $VERSION"
+          echo "Detected Target Version: $VERSION"
 
       - name: Zip binary
         if: matrix.settings.target == 'aarch64-linux-android'

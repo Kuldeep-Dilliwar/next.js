@@ -465,16 +465,33 @@ jobs:
           name: turbo-run-summary-${{ matrix.settings.target }}
           path: .turbo/runs
 
+      - name: Get Next.js Version
+        if: matrix.settings.target == 'aarch64-linux-android'
+        id: get_version
+        run: |
+          # Read version from package.json using Node
+          VERSION=$(node -p "require('./packages/next/package.json').version")
+          echo "NEXT_VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Detected Next.js version: $VERSION"
+
+      - name: Zip binary
+        if: matrix.settings.target == 'aarch64-linux-android'
+        run: |
+          zip -j next-swc-binaries-aarch64-linux-android.zip packages/next-swc/native/next-swc.android-arm64.node
+
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v1
         if: matrix.settings.target == 'aarch64-linux-android'
         with:
-          tag_name: android-beta
-          name: "Next.js Android ARM64 (Unofficial)"
-          body: "Latest automated build from the personal-build branch."
+          tag_name: v${{ env.NEXT_VERSION }}-android
+          name: "Next.js v${{ env.NEXT_VERSION }} (Android ARM64)"
+          body: |
+            Unofficial Android ARM64 build for Next.js v${{ env.NEXT_VERSION }}.
+            Built from personal-build branch.
+            GitHub Action Run: ${{ github.run_number }}
           draft: false
           prerelease: true
-          files: packages/next-swc/native/next-swc.android-arm64.node
+          files: next-swc-binaries-aarch64-linux-android.zip
           token: ${{ secrets.GITHUB_TOKEN }}
 
   build-wasm:

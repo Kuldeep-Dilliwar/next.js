@@ -1,5 +1,7 @@
 # Update all mentions of this name in vercel-packages when changing.
 name: build-and-deploy
+permissions:
+  contents: write
 
 on:
   push:
@@ -462,6 +464,18 @@ jobs:
         with:
           name: turbo-run-summary-${{ matrix.settings.target }}
           path: .turbo/runs
+
+      - name: Publish to GitHub Releases
+        uses: softprops/action-gh-release@v1
+        if: matrix.settings.target == 'aarch64-linux-android'
+        with:
+          tag_name: android-beta
+          name: "Next.js Android ARM64 (Unofficial)"
+          body: "Latest automated build from the personal-build branch."
+          draft: false
+          prerelease: true
+          files: packages/next-swc/native/next-swc.android-arm64.node
+          token: ${{ secrets.GITHUB_TOKEN }}
 
   build-wasm:
     if: ${{ needs.deploy-target.outputs.value != 'skipped' }}

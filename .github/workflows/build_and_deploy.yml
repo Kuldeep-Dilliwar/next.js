@@ -344,6 +344,16 @@ jobs:
           # this fails, but fetch with enough depth that we're likely to find a recent tag.
           fetch-depth: 100
 
+      - name: Capture Real Version
+        if: matrix.settings.target == 'aarch64-linux-android'
+        run: |
+          # Extract version from packages/next-swc/package.json
+          VERSION=$(jq -r '.version' packages/next/package.json)
+          echo "Captured Version: $VERSION"
+          
+          # Save it to the Global Environment for later steps to use
+          echo "NEXT_VERSION=$VERSION" >> $GITHUB_ENV
+
       - name: Setup node
         uses: actions/setup-node@v4
         if: ${{ !matrix.settings.docker }}

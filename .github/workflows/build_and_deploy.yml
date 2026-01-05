@@ -470,7 +470,7 @@ jobs:
         id: get_version
         run: |
           # Find the line with your Android dependency and extract just the version number
-          VERSION=$(grep '@next/swc-android-arm64' packages/next/package.json | head -n 1 | sed -E 's/.*: "(.*)".*/\1/')
+          VERSION=$(jq -r '.version' packages/next/package.json)
           
           # Fallback: If it fails to find it (for safety), use "custom"
           if [ -z "$VERSION" ]; then

@@ -475,20 +475,20 @@ jobs:
           name: turbo-run-summary-${{ matrix.settings.target }}
           path: .turbo/runs
 
-      - name: Get Target Version
-        if: matrix.settings.target == 'aarch64-linux-android'
-        id: get_version
-        run: |
-          # Find the line with your Android dependency and extract just the version number
-          VERSION=$(jq -r '.version' packages/next/package.json)
+      # - name: Get Target Version
+      #   if: matrix.settings.target == 'aarch64-linux-android'
+      #   id: get_version
+      #   run: |
+      #     # Find the line with your Android dependency and extract just the version number
+      #     VERSION=$(jq -r '.version' packages/next/package.json)
           
-          # Fallback: If it fails to find it (for safety), use "custom"
-          if [ -z "$VERSION" ]; then
-            VERSION="custom-build"
-          fi
+      #     # Fallback: If it fails to find it (for safety), use "custom"
+      #     if [ -z "$VERSION" ]; then
+      #       VERSION="custom-build"
+      #     fi
           
-          echo "NEXT_VERSION=$VERSION" >> $GITHUB_ENV
-          echo "Detected Target Version: $VERSION"
+      #     echo "NEXT_VERSION=$VERSION" >> $GITHUB_ENV
+      #     echo "Detected Target Version: $VERSION"
 
       - name: Zip binary
         if: matrix.settings.target == 'aarch64-linux-android'

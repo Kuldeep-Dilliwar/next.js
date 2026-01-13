@@ -29,10 +29,12 @@ let argv = require('yargs/yargs')(process.argv.slice(2))
   .string('g')
   .alias('g', 'group')
   .number('c')
+  .boolean('related')
   .boolean('dry')
   .boolean('print-tests')
   .describe('print-tests', 'Prints the test files that will be run')
   .boolean('local')
+  .alias('r', 'related')
   .alias('c', 'concurrency').argv
 
 function escapeRegexp(str) {
@@ -57,6 +59,12 @@ const isTestJob = !!process.env.NEXT_TEST_JOB
 const shouldContinueTestsOnError =
   process.env.NEXT_TEST_CONTINUE_ON_ERROR === 'true'
 
+// Check env to load a list of test paths to skip retry. This is to be used in conjunction with NEXT_TEST_CONTINUE_ON_ERROR,
+// When try to run all of the tests regardless of pass / fail and want to skip retrying `known` failed tests.
+// manifest should be a json file with an array of test paths.
+const skipRetryTestManifest = process.env.NEXT_TEST_SKIP_RETRY_MANIFEST
+  ? require(process.env.NEXT_TEST_SKIP_RETRY_MANIFEST)
+  : []
 const KV_TIMINGS_KEY = 'test-timings'
 
 const kvClient =
@@ -228,6 +236,7 @@ async function main() {
     group: argv.group ?? false,
     testPattern: argv.testPattern ?? false,
     type: argv.type ?? false,
+    related: argv.related ?? false,
     retries: argv.retries ?? DEFAULT_NUM_RETRIES,
     dry: argv.dry ?? false,
     local: argv.local ?? false,
@@ -277,6 +286,20 @@ async function main() {
 
     if (options.testPattern && typeof options.testPattern === 'string') {
       testPatternRegex = new RegExp(options.testPattern)
+    }
+
+    if (options.related) {
+      const { getRelatedTests } = await import('./scripts/run-related-test.mjs')
+      const tests = await getRelatedTests()
+      if (tests.length)
+        testPatternRegex = new RegExp(tests.map(escapeRegexp).join('|'))
+
+      if (testPatternRegex) {
+        console.log('Running related tests:', testPatternRegex.toString())
+      } else {
+        console.log('No matching related tests, exiting.')
+        process.exit(0)
+      }
     }
 
     tests = (
@@ -532,6 +555,7 @@ ${ENDGROUP}`)
               // Format the output of junit report to include the test name
               // For the debugging purpose to compare actual run list to the generated reports
               // [NOTE]: This won't affect if junit reporter is not enabled
+              // @ts-expect-error .replaceAll() does exist. Follow-up why TS is not recognizing it
               JEST_JUNIT_OUTPUT_NAME: test.file.replaceAll('/', '_'),
               // Specify suite name for the test to avoid unexpected merging across different env / grouped tests
               // This is not individual suites name (corresponding 'describe'), top level suite name which have redundant names by default
@@ -665,10 +689,24 @@ ${ENDGROUP}`)
   const runTest = async (/** @type {TestFile} */ test) => {
     let passed = false
 
+    const shouldSkipRetries = skipRetryTestManifest.find((t) =>
+      t.includes(test.file)
+    )
+    const numRetries = shouldSkipRetries ? 0 : originalRetries
+    if (shouldSkipRetries) {
+      console.log(
+        `Skipping retry for ${test.file} due to skipRetryTestManifest`
+      )
+    }
+
     for (let i = 0; i < numRetries + 1; i++) {
       try {
         console.log(`Starting ${test.file} retry ${i}/${numRetries}`)
-        const time = await runTestOnce(test, i === numRetries, i > 0)
+        const time = await runTestOnce(
+          test,
+          shouldSkipRetries || i === numRetries,
+          shouldSkipRetries || i > 0
+        )
         timings.push({
           file: test.file,
           time,
@@ -745,6 +783,7 @@ ${ENDGROUP}`)
 
   const directorySemas = new Map()
 
+  const originalRetries = numRetries
   const results = await Promise.allSettled(
     tests.map(async (test) => {
       const dirName = path.dirname(test.file)

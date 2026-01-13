@@ -77,18 +77,19 @@ async fn compute_side_effect_free_module_info_single(
     let mut locally_side_effect_free_modules_that_have_side_effects = FxHashSet::default();
     graph.traverse_edges_reverse_dfs(
         // Start from all the side effectful nodes
-        module_side_effects
-            .iter()
-            .filter_map(|(m, e)| (*e == ModuleSideEffects::SideEffectful).then_some(*m)),
+        module_side_effects.iter().filter_map(|(m, e)| {
+            if *e == ModuleSideEffects::SideEffectful {
+                Some(*m)
+            } else {
+                None
+            }
+        }),
         &mut (),
         // child is a previously visited module that we know is side effectful
         // parent is a module that depends on it.
         |child, parent, _s| {
             Ok(if child.is_some() {
-                match module_side_effects
-                    .get(&parent)
-                    .expect("the map is populated for all modules in this graph")
-                {
+                match module_side_effects.get(&parent).unwrap() {
                     ModuleSideEffects::SideEffectful | ModuleSideEffects::SideEffectFree => {
                         // We have either already seen this or don't want to follow it
                         GraphTraversalAction::Exclude

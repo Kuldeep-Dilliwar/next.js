@@ -358,7 +358,6 @@ async fn run_test_operation(resource: RcStr) -> Result<Vc<FileSystemPath>> {
                     ..Default::default()
                 })),
                 ignore_dynamic_requests: true,
-                infer_module_side_effects: true,
                 enable_exports_info_inlining: true,
                 ..Default::default()
             },

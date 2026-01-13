@@ -870,13 +870,6 @@ export async function handleAction({
           const { pipeline } =
             require('node:stream/promises') as typeof import('node:stream/promises')
 
-          // If actionBody was stashed in request meta (from parsing the postponed
-          // state prefix in minimal mode), use it instead of req.body
-          const actionBodyFromMeta = getRequestMeta(req, 'actionBody')
-          const body: import('node:stream').Readable = actionBodyFromMeta
-            ? Readable.from(actionBodyFromMeta)
-            : req.body
-
           const defaultBodySizeLimit = '1 MB'
           const bodySizeLimit =
             serverActions?.bodySizeLimit ?? defaultBodySizeLimit
@@ -930,7 +923,7 @@ export async function handleAction({
               const abortController = new AbortController()
               try {
                 ;[, boundActionArguments] = await Promise.all([
-                  pipeline(body, sizeLimitTransform, busboy, {
+                  pipeline(req.body, sizeLimitTransform, busboy, {
                     signal: abortController.signal,
                   }),
                   decodeReplyFromBusboy(busboy, serverModuleMap, {
@@ -963,7 +956,7 @@ export async function handleAction({
               const abortController = new AbortController()
               try {
                 ;[, formData] = await Promise.all([
-                  pipeline(body, sizeLimitTransform, sizeLimitedBody, {
+                  pipeline(req.body, sizeLimitTransform, sizeLimitedBody, {
                     signal: abortController.signal,
                   }),
                   fakeRequest.formData(),
@@ -1039,7 +1032,7 @@ export async function handleAction({
 
             const chunks: Buffer[] = []
             await Promise.all([
-              pipeline(body, sizeLimitTransform, sizeLimitedBody),
+              pipeline(req.body, sizeLimitTransform, sizeLimitedBody),
               (async () => {
                 for await (const chunk of sizeLimitedBody) {
                   chunks.push(Buffer.from(chunk))

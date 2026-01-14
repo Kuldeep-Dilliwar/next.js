@@ -47,7 +47,7 @@ impl FetchClientConfig {
     fn try_build_uncached_reqwest_client(&self) -> reqwest::Result<reqwest::Client> {
         #[allow(unused_mut)]
         let mut builder = reqwest::Client::builder();
-        #[cfg(any(target_os = "linux", all(windows, not(target_arch = "aarch64"))))]
+        #[cfg(any(target_os = "linux", target_os = "android", all(windows, not(target_arch = "aarch64"))))]
         {
             use std::sync::Once;
             static ONCE: Once = Once::new();

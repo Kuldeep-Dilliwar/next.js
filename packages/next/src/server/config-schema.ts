@@ -205,6 +205,7 @@ export const experimentalSchema = {
       allowedOrigins: z.array(z.string()).optional(),
     })
     .optional(),
+  maxPostponedStateSize: zSizeLimit.optional(),
   // The original type was Record<string, any>
   extensionAlias: z.record(z.string(), z.any()).optional(),
   externalDir: z.boolean().optional(),
@@ -306,7 +307,6 @@ export const experimentalSchema = {
   turbopackClientSideNestedAsyncChunking: z.boolean().optional(),
   turbopackServerSideNestedAsyncChunking: z.boolean().optional(),
   turbopackImportTypeBytes: z.boolean().optional(),
-  turbopackUseSystemTlsCerts: z.boolean().optional(),
   turbopackUseBuiltinBabel: z.boolean().optional(),
   turbopackUseBuiltinSass: z.boolean().optional(),
   turbopackModuleIds: z.enum(['named', 'deterministic']).optional(),
@@ -350,6 +350,7 @@ export const experimentalSchema = {
   lockDistDir: z.boolean().optional(),
   hideLogsAfterAbort: z.boolean().optional(),
   runtimeServerDeploymentId: z.boolean().optional(),
+  devCacheControlNoCache: z.boolean().optional(),
 }
 
 export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
@@ -565,6 +566,7 @@ export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
           .max(50)
           .optional(),
         unoptimized: z.boolean().optional(),
+        customCacheHandler: z.boolean().optional(),
         contentSecurityPolicy: z.string().optional(),
         contentDispositionType: z.enum(['inline', 'attachment']).optional(),
         dangerouslyAllowSVG: z.boolean().optional(),
@@ -587,6 +589,12 @@ export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
         loader: z.enum(VALID_LOADERS).optional(),
         loaderFile: z.string().optional(),
         maximumRedirects: z.number().int().min(0).max(20).optional(),
+        maximumResponseBody: z
+          .number()
+          .int()
+          .min(1)
+          .max(Number.MAX_SAFE_INTEGER)
+          .optional(),
         minimumCacheTTL: z.number().int().gte(0).optional(),
         path: z.string().optional(),
         qualities: z

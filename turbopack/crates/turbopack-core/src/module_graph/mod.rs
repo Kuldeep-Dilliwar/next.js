@@ -1,11 +1,10 @@
 use core::panic;
 use std::{
-    collections::{BinaryHeap, VecDeque, hash_map::Entry},
+    collections::{BinaryHeap, VecDeque},
     future::Future,
 };
 
 use anyhow::{Context, Result, bail};
-use auto_hash_map::AutoSet;
 use bincode::{Decode, Encode};
 use petgraph::{
     Direction,
@@ -27,7 +26,7 @@ use turbo_tasks_fs::FileSystemPath;
 
 use crate::{
     chunk::{AsyncModuleInfo, ChunkingContext, ChunkingType},
-    issue::{ImportTrace, ImportTracer, ImportTraces, Issue},
+    issue::{ImportTracer, ImportTraces, Issue},
     module::Module,
     module_graph::{
         async_module_info::{AsyncModulesInfo, compute_async_module_info},
@@ -413,14 +412,18 @@ impl SingleModuleGraph {
         graph_idx: u32,
         binding_usage: &'l Option<ReadRef<BindingUsageInfo>>,
     ) -> Result<()> {
-        // see https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm
-        // but iteratively instead of recursively
+        // See https://en.wikipedia.org/wiki/Tarjan%27s_strongly_connected_components_algorithm, but
+        // implemented iteratively instead of recursively.
+        //
+        // Compared to the standard Tarjan's, this also treated self-references (via
+        // `has_self_loop`) as SCCs.
 
         #[derive(Clone)]
         struct NodeState {
             index: u32,
             lowlink: u32,
             on_stack: bool,
+            has_self_loop: bool,
         }
         enum VisitStep {
             UnvisitedNode(NodeIndex),
@@ -445,6 +448,7 @@ impl SingleModuleGraph {
                             index,
                             lowlink: index,
                             on_stack: true,
+                            has_self_loop: false,
                         });
                         index += 1;
                         stack.push(node);
@@ -468,6 +472,9 @@ impl SingleModuleGraph {
                                     let index = node_state.index;
                                     let parent_state = node_states[node.index()].as_mut().unwrap();
                                     parent_state.lowlink = parent_state.lowlink.min(index);
+                                    if succ == node {
+                                        parent_state.has_self_loop = true;
+                                    }
                                 }
                             } else {
                                 visit_stack.push(VisitStep::EdgeAfterVisit {
@@ -487,6 +494,7 @@ impl SingleModuleGraph {
                     }
                     VisitStep::AfterVisit(node) => {
                         let node_state = node_states[node.index()].as_ref().unwrap();
+                        let node_has_self_loop = node_state.has_self_loop;
                         if node_state.lowlink == node_state.index {
                             loop {
                                 let poppped = stack.pop().unwrap();
@@ -501,7 +509,7 @@ impl SingleModuleGraph {
                                     break;
                                 }
                             }
-                            if scc.len() > 1 {
+                            if scc.len() > 1 || node_has_self_loop {
                                 visit_cycle(&scc)?;
                             }
                             scc.clear();
@@ -511,104 +519,6 @@ impl SingleModuleGraph {
             }
         }
         Ok(())
-    }
-
-    /// For each issue computes a (possibly empty) list of traces from the file that produced the
-    /// issue to roots in this module graph.
-    /// There are potentially multiple traces because a given file may get assigned to multiple
-    /// modules depend on how it is used in the application.  Consider a simple utility that is used
-    /// by SSR pages, client side code, and the edge runtime.  This may lead to there being 3
-    /// traces.
-    /// The returned map is guaranteed to have an entry for every issue.
-    pub async fn compute_import_traces_for_issues(
-        &self,
-        issues: &AutoSet<ResolvedVc<Box<dyn Issue>>>,
-    ) -> Result<FxHashMap<ResolvedVc<Box<dyn Issue>>, Vec<ImportTrace>>> {
-        let issue_paths = issues
-            .iter()
-            .map(|issue| issue.file_path().owned())
-            .try_join()
-            .await?;
-        let mut file_path_to_traces: FxHashMap<FileSystemPath, Vec<ImportTrace>> =
-            FxHashMap::with_capacity_and_hasher(issue_paths.len(), Default::default());
-        // initialize an empty vec for each path we care about
-        for issue in &issue_paths {
-            file_path_to_traces.entry(issue.clone()).or_default();
-        }
-
-        {
-            let modules =
-                self.modules
-                    .iter()
-                    .map(|(module, &index)| async move {
-                        Ok((module.ident().path().owned().await?, index))
-                    })
-                    .try_join()
-                    .await?;
-            // Reverse the graph so we can find paths to roots
-            let reversed_graph = Reversed(&self.graph.0);
-            for (path, module_idx) in modules {
-                if let Entry::Occupied(mut entry) = file_path_to_traces.entry(path) {
-                    // compute the path from this index to a root of the graph.
-                    let Some((_, path)) = petgraph::algo::astar(
-                        &reversed_graph,
-                        module_idx,
-                        |n| reversed_graph.neighbors(n).next().is_none(),
-                        // Edge weights
-                        |e| match e.weight().chunking_type {
-                            // Prefer following normal imports/requires when we can
-                            ChunkingType::Parallel { .. } => 0,
-                            _ => 1,
-                        },
-                        // `astar` can be accelerated with a distance estimation heuristic, as long
-                        // as our estimate is never > the actual distance.
-                        // However we don't have a mechanism, so just
-                        // estimate 0 which essentially makes this behave like
-                        // dijktra's shortest path algorithm.  `petgraph` has an implementation of
-                        // dijkstra's but it doesn't report  paths, just distances.
-                        // NOTE: dijkstra's with integer weights can be accelerated with incredibly
-                        // efficient priority queue structures (basically with only 0 and 1 as
-                        // weights you can use a `VecDeque`!).  However,
-                        // this is unlikely to be a performance concern.
-                        // Furthermore, if computing paths _does_ become a performance concern, the
-                        // solution would be a hand written implementation of dijkstras so we can
-                        // hoist redundant work out of this loop.
-                        |_| 0,
-                    ) else {
-                        unreachable!("there must be a path to a root");
-                    };
-                    // Represent the path as a sequence of AssetIdents
-                    // TODO: consider hinting at various transitions (e.g. was this an
-                    // import/require/dynamic-import?)
-                    let path = path
-                        .into_iter()
-                        .map(async |n| {
-                            Ok(self
-                                .graph
-                                .node_weight(n)
-                                .unwrap()
-                                .module()
-                                .ident()
-                                .await?
-                                .clone())
-                        })
-                        .try_join()
-                        .await?;
-                    entry.get_mut().push(path);
-                }
-            }
-        }
-        let mut issue_to_traces: FxHashMap<ResolvedVc<Box<dyn Issue>>, Vec<ImportTrace>> =
-            FxHashMap::with_capacity_and_hasher(issues.len(), Default::default());
-        // Map filepaths back to issues
-        // We can do this by zipping the issue_paths with the issues since they are in the same
-        // order.
-        for (path, issue) in issue_paths.iter().zip(issues) {
-            if let Some(traces) = file_path_to_traces.get(path) {
-                issue_to_traces.insert(*issue, traces.clone());
-            }
-        }
-        Ok(issue_to_traces)
     }
 }
 
@@ -1341,6 +1251,7 @@ impl ModuleGraphRef {
 
     /// Traverse all cycles in the graph (where the edge filter returns true for the whole cycle)
     /// and call the visitor with the nodes in the cycle.
+    /// Notably, module self-references are also treated as cycles.
     pub fn traverse_cycles(
         &self,
         edge_filter: impl Fn(&RefData) -> bool,
@@ -1989,6 +1900,58 @@ pub mod tests {
                         (Some(rcstr!("c.js")), rcstr!("e.js")),
                     ],
                     visits
+                );
+
+                Ok(())
+            },
+        )
+        .await;
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_traverse_cycles() {
+        run_graph_test(
+            vec![rcstr!("a.js")],
+            {
+                let mut deps = FxHashMap::default();
+                // The cycles are: (i, j, k), and (s) which a self-import
+                //          a
+                //      /   |    \
+                //     /i   s-\   x
+                //     |j   \-/
+                //     \k
+                deps.insert(
+                    rcstr!("a.js"),
+                    vec![rcstr!("i.js"), rcstr!("s.js"), rcstr!("x.js")],
+                );
+                deps.insert(rcstr!("i.js"), vec![rcstr!("j.js")]);
+                deps.insert(rcstr!("j.js"), vec![rcstr!("k.js")]);
+                deps.insert(rcstr!("k.js"), vec![rcstr!("i.js")]);
+                deps.insert(rcstr!("s.js"), vec![rcstr!("s.js")]);
+                deps
+            },
+            |graph, _, module_to_name| {
+                let mut cycles = vec![];
+
+                graph.traverse_cycles(
+                    |_| true,
+                    |cycle| {
+                        cycles.push(
+                            cycle
+                                .iter()
+                                .map(|n| module_to_name.get(*n).unwrap().clone())
+                                .collect::<Vec<_>>(),
+                        );
+                        Ok(())
+                    },
+                )?;
+
+                assert_eq!(
+                    cycles,
+                    vec![
+                        vec![rcstr!("k.js"), rcstr!("j.js"), rcstr!("i.js")],
+                        vec![rcstr!("s.js")]
+                    ],
                 );
 
                 Ok(())

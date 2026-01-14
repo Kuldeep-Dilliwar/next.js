@@ -475,34 +475,9 @@ export interface ExperimentalConfig {
    * analyze module code to determine if it has side effects. This can improve tree shaking
    * and bundle size at the cost of some additional analysis.
    *
-   * Defaults to `true` in canary builds only
+   * Defaults to `true`
    */
   turbopackInferModuleSideEffects?: boolean
-
-  /**
-   * Use the system-provided CA roots instead of bundled CA roots for external HTTPS requests
-   * made by Turbopack. Currently this is only used for fetching data from Google Fonts.
-   *
-   * This may be useful in cases where you or an employer are MITMing traffic.
-   *
-   * This option is experimental because:
-   * - This may cause small performance problems, as it uses [`rustls-native-certs`](
-   *   https://github.com/rustls/rustls-native-certs).
-   * - In the future, this may become the default, and this option may be eliminated, once
-   *   <https://github.com/seanmonstar/reqwest/issues/2159> is resolved.
-   *
-   * Users who need to configure this behavior system-wide can override the project
-   * configuration using the `NEXT_TURBOPACK_EXPERIMENTAL_USE_SYSTEM_TLS_CERTS=1` environment
-   * variable.
-   *
-   * This option is ignored on Windows on ARM, where the native TLS implementation is always
-   * used.
-   *
-   * If you need to set a proxy, Turbopack [respects the common `HTTP_PROXY` and `HTTPS_PROXY`
-   * environment variable convention](https://docs.rs/reqwest/latest/reqwest/#proxies). HTTP
-   * proxies are supported, SOCKS proxies are not currently supported.
-   */
-  turbopackUseSystemTlsCerts?: boolean
 
   /**
    * Set this to `false` to disable the automatic configuration of the babel loader when a Babel
@@ -651,6 +626,14 @@ export interface ExperimentalConfig {
      */
     allowedOrigins?: string[]
   }
+
+  /**
+   * Allows adjusting the maximum size of the postponed state body for PPR
+   * resume requests. This includes the Resume Data Cache (RDC) which may grow
+   * large for some applications.
+   * @default '100 MB'
+   */
+  maxPostponedStateSize?: SizeLimit
 
   /**
    * enables the minification of server code.
@@ -859,6 +842,18 @@ export interface ExperimentalConfig {
    * @default false
    */
   runtimeServerDeploymentId?: boolean
+
+  /**
+   * Use 'no-cache' instead of 'no-store' in the Cache-Control header for development.
+   * This allows conditional requests to the server, which can help with development
+   * workflows that benefit from caching validation.
+   *
+   * When enabled, the Cache-Control header changes from 'no-store, must-revalidate'
+   * to 'no-cache, must-revalidate'.
+   *
+   * @default false
+   */
+  devCacheControlNoCache?: boolean
 }
 
 export type ExportPathMap = {
@@ -1583,7 +1578,8 @@ export const defaultConfig = Object.freeze({
     mcpServer: true,
     turbopackFileSystemCacheForDev: true,
     turbopackFileSystemCacheForBuild: false,
-    turbopackInferModuleSideEffects: !isStableBuild(),
+    turbopackInferModuleSideEffects: true,
+    devCacheControlNoCache: false,
   },
   htmlLimitedBots: undefined,
   bundlePagesRouterDependencies: false,
@@ -1678,6 +1674,8 @@ export interface NextConfigRuntime {
     | 'proxyTimeout'
     | 'testProxy'
     | 'runtimeServerDeploymentId'
+    | 'maxPostponedStateSize'
+    | 'devCacheControlNoCache'
   > & {
     // Pick on @internal fields generates invalid .d.ts files
     /** @internal */
@@ -1733,6 +1731,8 @@ export function getNextConfigRuntime(
         proxyTimeout: ex.proxyTimeout,
         testProxy: ex.testProxy,
         runtimeServerDeploymentId: ex.runtimeServerDeploymentId,
+        maxPostponedStateSize: ex.maxPostponedStateSize,
+        devCacheControlNoCache: ex.devCacheControlNoCache,
 
         trustHostHeader: ex.trustHostHeader,
         isExperimentalCompile: ex.isExperimentalCompile,
@@ -1780,3 +1780,9 @@ export function getNextConfigRuntime(
 
   return runtimeConfig
 }
+
+// Re-export from shared lib for backwards compatibility
+export {
+  DEFAULT_MAX_POSTPONED_STATE_SIZE,
+  parseMaxPostponedStateSize,
+} from '../shared/lib/size-limit'

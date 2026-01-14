@@ -263,6 +263,7 @@ pub enum CachedDataItem {
     },
     CellDependency {
         target: CellRef,
+        key: Option<u64>,
         value: (),
     },
     CollectiblesDependency {
@@ -277,6 +278,7 @@ pub enum CachedDataItem {
     },
     CellDependent {
         cell: CellId,
+        key: Option<u64>,
         task: TaskId,
         value: (),
     },
@@ -323,9 +325,6 @@ pub enum CachedDataItem {
     },
 
     // Flags
-    Stateful {
-        value: (),
-    },
     HasInvalidator {
         value: (),
     },
@@ -365,6 +364,8 @@ pub enum CachedDataItem {
     OutdatedCellDependency {
         #[bincode(skip, default = "unreachable_decode")]
         target: CellRef,
+        #[bincode(skip, default = "unreachable_decode")]
+        key: Option<u64>,
         #[bincode(skip, default = "unreachable_decode")]
         value: (),
     },
@@ -424,7 +425,6 @@ impl CachedDataItem {
             }
             CachedDataItem::AggregatedDirtyContainerCount { .. } => true,
             CachedDataItem::AggregatedCurrentSessionCleanContainerCount { .. } => false,
-            CachedDataItem::Stateful { .. } => true,
             CachedDataItem::HasInvalidator { .. } => true,
             CachedDataItem::Immutable { .. } => true,
             CachedDataItem::Activeness { .. } => false,
@@ -495,7 +495,6 @@ impl CachedDataItem {
             | Self::AggregatedDirtyContainer { .. }
             | Self::AggregatedCollectible { .. }
             | Self::AggregatedDirtyContainerCount { .. }
-            | Self::Stateful { .. }
             | Self::HasInvalidator { .. }
             | Self::Immutable { .. }
             | Self::CollectiblesDependent { .. } => TaskDataCategory::Meta,
@@ -556,7 +555,6 @@ impl CachedDataItemKey {
             }
             CachedDataItemKey::AggregatedDirtyContainerCount { .. } => true,
             CachedDataItemKey::AggregatedCurrentSessionCleanContainerCount { .. } => false,
-            CachedDataItemKey::Stateful { .. } => true,
             CachedDataItemKey::HasInvalidator { .. } => true,
             CachedDataItemKey::Immutable { .. } => true,
             CachedDataItemKey::Activeness { .. } => false,
@@ -595,7 +593,6 @@ impl CachedDataItemType {
             | Self::AggregatedDirtyContainer { .. }
             | Self::AggregatedCollectible { .. }
             | Self::AggregatedDirtyContainerCount { .. }
-            | Self::Stateful { .. }
             | Self::HasInvalidator { .. }
             | Self::Immutable { .. }
             | Self::CollectiblesDependent { .. } => TaskDataCategory::Meta,
@@ -634,7 +631,6 @@ impl CachedDataItemType {
             | Self::AggregatedDirtyContainer
             | Self::AggregatedCollectible
             | Self::AggregatedDirtyContainerCount
-            | Self::Stateful
             | Self::HasInvalidator
             | Self::Immutable => true,
 
@@ -677,8 +673,8 @@ mod tests {
     #[test]
     fn test_sizes() {
         assert_eq!(std::mem::size_of::<super::CachedDataItem>(), 40);
-        assert_eq!(std::mem::size_of::<super::CachedDataItemKey>(), 20);
+        assert_eq!(std::mem::size_of::<super::CachedDataItemKey>(), 32);
         assert_eq!(std::mem::size_of::<super::CachedDataItemValue>(), 32);
-        assert_eq!(std::mem::size_of::<super::CachedDataItemStorage>(), 48);
+        assert_eq!(std::mem::size_of::<super::CachedDataItemStorage>(), 56);
     }
 }

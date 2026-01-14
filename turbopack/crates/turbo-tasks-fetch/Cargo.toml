@@ -42,7 +42,7 @@ reqwest = { workspace = true, features = ["rustls"] }
 # - Windows: aws-lc-sys requires NASM and CMake which we don't have installed in
 #   CI, and would complicate the development environment setup. We could
 #   possibly switch to always using `native-tls` on Windows in the future.
-[target.'cfg(any(target_os = "linux", all(windows, not(target_arch = "aarch64"))))'.dependencies]
+[target.'cfg(any(target_os = "linux", target_os = "android", all(windows, not(target_arch = "aarch64"))))'.dependencies]
 reqwest = { workspace = true, features = ["rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 

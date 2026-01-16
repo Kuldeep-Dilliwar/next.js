@@ -30,7 +30,7 @@ use turbopack_core::{
     file_source::FileSource,
     ident::AssetIdent,
     module::Module,
-    module_graph::{ModuleGraph, SingleModuleGraph, async_module_info::AsyncModulesInfo},
+    module_graph::{ModuleGraph, ModuleGraphLayer, async_module_info::AsyncModulesInfo},
     output::OutputAsset,
     reference_type::{EcmaScriptModulesReferenceSubType, ReferenceType},
     resolve::ModulePart,
@@ -168,7 +168,7 @@ async fn build_manifest(
 
     let actions_value = actions.await?;
     let loader_id = chunk_item.id().await?;
-    let loader_id = match &*loader_id {
+    let loader_id = match &loader_id {
         ModuleId::Number(id) => ActionManifestModuleId::Number(*id),
         ModuleId::String(id) => ActionManifestModuleId::String(id),
     };
@@ -453,7 +453,9 @@ pub struct AllModuleActions(
 );
 
 #[turbo_tasks::function]
-pub async fn map_server_actions(graph: Vc<SingleModuleGraph>) -> Result<Vc<AllModuleActions>> {
+pub async fn map_server_actions(
+    graph: ResolvedVc<ModuleGraphLayer>,
+) -> Result<Vc<AllModuleActions>> {
     let actions = graph
         .await?
         .iter_nodes()

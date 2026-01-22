@@ -3,8 +3,8 @@ import type { RenderOpts, PreloadCallbacks } from './types'
 import type {
   ActionResult,
   DynamicParamTypesShort,
+  DynamicSegmentTuple,
   FlightRouterState,
-  Segment,
   CacheNodeSeedData,
   RSCPayload,
   FlightData,
@@ -219,14 +219,14 @@ import { anySegmentHasRuntimePrefetchEnabled } from './staged-validation'
 import { warnOnce } from '../../shared/lib/utils/warn-once'
 
 export type GetDynamicParamFromSegment = (
-  // [slug] / [[slug]] / [...slug]
-  segment: string
+  // The LoaderTree to extract the dynamic param from
+  loaderTree: LoaderTree
 ) => DynamicParam | null
 
 export type DynamicParam = {
   param: string
   value: string | string[] | null
-  treeSegment: Segment
+  treeSegment: DynamicSegmentTuple
   type: DynamicParamTypesShort
 }
 
@@ -385,10 +385,11 @@ function createNotFoundLoaderTree(loaderTree: LoaderTree): LoaderTree {
   return [
     '',
     {
-      children: [PAGE_SEGMENT_KEY, {}, notFoundTreeComponents],
+      children: [PAGE_SEGMENT_KEY, {}, notFoundTreeComponents, null],
     },
     // When global-not-found is present, skip layout from components
     hasGlobalNotFound ? components : {},
+    null, // staticSiblings
   ]
 }
 
@@ -397,23 +398,25 @@ function createNotFoundLoaderTree(loaderTree: LoaderTree): LoaderTree {
  */
 function makeGetDynamicParamFromSegment(
   interpolatedParams: Params,
-  fallbackRouteParams: OpaqueFallbackRouteParams | null
+  fallbackRouteParams: OpaqueFallbackRouteParams | null,
+  optimisticRouting: boolean
 ): GetDynamicParamFromSegment {
-  return function getDynamicParamFromSegment(
-    // [slug] / [[slug]] / [...slug]
-    segment: string
-  ) {
+  return function getDynamicParamFromSegment(loaderTree: LoaderTree) {
+    const [segment, , , staticSiblings] = loaderTree
     const segmentParam = getSegmentParam(segment)
     if (!segmentParam) {
       return null
     }
     const segmentKey = segmentParam.paramName
     const dynamicParamType = dynamicParamTypes[segmentParam.paramType]
+    // Static siblings are only included when optimistic routing is enabled
+    const siblings = optimisticRouting ? staticSiblings : null
     return getDynamicParam(
       interpolatedParams,
       segmentKey,
       dynamicParamType,
-      fallbackRouteParams
+      fallbackRouteParams,
+      siblings
     )
   }
 }
@@ -2012,23 +2015,22 @@ async function renderToHTMLOrFlightImpl(
 
   const getDynamicParamFromSegment = makeGetDynamicParamFromSegment(
     interpolatedParams,
-    fallbackRouteParams
+    fallbackRouteParams,
+    renderOpts.experimental.optimisticRouting
   )
 
   const isPossibleActionRequest = getIsPossibleServerAction(req)
 
-  // For implicit tags, we need to use the rewritten pathname (if a rewrite
-  // occurred) rather than the original request pathname. Implicit tags are used
-  // to check cache staleness on read (for 'use cache') and as soft tags for
-  // fetch cache. Using the destination path ensures that
-  // revalidatePath('/dest') invalidates cache entries for pages rewritten to
-  // that destination.
-  const implicitTagsPathname =
-    getRequestMeta(req, 'rewrittenPathname') || url.pathname
+  // For implicit tags, we use the resolved pathname which has dynamic params
+  // interpolated, is decoded, and has trailing slash removed.
+  const resolvedPathname = getRequestMeta(req, 'resolvedPathname')
+  if (!resolvedPathname) {
+    throw new InvariantError('resolvedPathname must be set in request metadata')
+  }
 
   const implicitTags = await getImplicitTags(
     workStore.page,
-    implicitTagsPathname,
+    resolvedPathname,
     fallbackRouteParams
   )
 
@@ -4274,22 +4276,11 @@ async function prerenderToStream(
       // to cut the render off.
       const cacheSignal = new CacheSignal()
 
-      let resumeDataCache: RenderResumeDataCache | PrerenderResumeDataCache
-      let renderResumeDataCache: RenderResumeDataCache | null = null
-      let prerenderResumeDataCache: PrerenderResumeDataCache | null = null
-
-      if (renderOpts.renderResumeDataCache) {
-        // If a prefilled immutable render resume data cache is provided, e.g.
-        // when prerendering an optional fallback shell after having prerendered
-        // pages with defined params, we use this instead of a prerender resume
-        // data cache.
-        resumeDataCache = renderResumeDataCache =
-          renderOpts.renderResumeDataCache
-      } else {
-        // Otherwise we create a new mutable prerender resume data cache.
-        resumeDataCache = prerenderResumeDataCache =
-          createPrerenderResumeDataCache()
-      }
+      // Always start with a fresh prerender RDC so warmup can fill misses,
+      // even when we have a prefilled render RDC to seed from.
+      const prerenderResumeDataCache = createPrerenderResumeDataCache()
+      let renderResumeDataCache: RenderResumeDataCache | null =
+        renderOpts.renderResumeDataCache ?? null
 
       const initialServerPayloadPrerenderStore: PrerenderStore = {
         type: 'prerender',
@@ -4559,6 +4550,13 @@ async function prerenderToStream(
         initialClientReactController.abort()
       }
 
+      if (renderOpts.renderResumeDataCache) {
+        // Swap to the warmed cache so the final render uses entries produced during warmup.
+        renderResumeDataCache = createRenderResumeDataCache(
+          prerenderResumeDataCache
+        )
+      }
+
       const finalServerReactController = new AbortController()
       const finalServerRenderController = new AbortController()
 
@@ -4825,13 +4823,13 @@ async function prerenderToStream(
               ? DynamicHTMLPreludeState.Empty
               : DynamicHTMLPreludeState.Full,
             fallbackRouteParams,
-            resumeDataCache,
+            prerenderResumeDataCache,
             cacheComponents
           )
         } else {
           // Dynamic Data case
           metadata.postponed = await getDynamicDataPostponedState(
-            resumeDataCache,
+            prerenderResumeDataCache,
             cacheComponents
           )
         }
@@ -4853,7 +4851,9 @@ async function prerenderToStream(
           collectedExpire: finalServerPrerenderStore.expire,
           collectedStale: selectStaleTime(finalServerPrerenderStore.stale),
           collectedTags: finalServerPrerenderStore.tags,
-          renderResumeDataCache: createRenderResumeDataCache(resumeDataCache),
+          renderResumeDataCache: createRenderResumeDataCache(
+            prerenderResumeDataCache
+          ),
         }
       } else {
         // Static case
@@ -4970,7 +4970,9 @@ async function prerenderToStream(
           collectedExpire: finalServerPrerenderStore.expire,
           collectedStale: selectStaleTime(finalServerPrerenderStore.stale),
           collectedTags: finalServerPrerenderStore.tags,
-          renderResumeDataCache: createRenderResumeDataCache(resumeDataCache),
+          renderResumeDataCache: createRenderResumeDataCache(
+            prerenderResumeDataCache
+          ),
         }
       }
     } else if (experimental.isRoutePPREnabled) {

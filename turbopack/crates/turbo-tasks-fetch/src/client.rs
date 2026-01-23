@@ -74,6 +74,84 @@ impl FetchClientConfig {
                 },
             ))
         }
+        #[cfg(target_os = "android")]
+        {
+            let termux_path = std::path::Path::new("/data/data/com.termux/files/usr/etc/tls/cert.pem");
+            let env_var = std::env::var("TURBO_SSL_CERT_FILE");
+
+            // --- BRANCH A: TERMUX MODE (Fix the Crash) ---
+            if termux_path.exists() {
+                println!("[Turbopack] Termux environment detected.");
+                
+                let mut root_store = rustls::RootCertStore::empty();
+                let mut paths_to_load = vec![termux_path.to_path_buf()];
+
+                // If user also provided a custom cert, add it to our manual list
+                if let Ok(p) = env_var {
+                    paths_to_load.push(std::path::PathBuf::from(p));
+                }
+
+                for cert_path in paths_to_load {
+                    if let Ok(pem_bytes) = std::fs::read(&cert_path) {
+                        let content = String::from_utf8_lossy(&pem_bytes);
+                        // ... (Reuse the parsing logic from before) ...
+                        let header = "-----BEGIN CERTIFICATE-----";
+                        let footer = "-----END CERTIFICATE-----";
+                        let mut current_idx = 0;
+                        while let Some(start_offset) = content[current_idx..].find(header) {
+                            let start = current_idx + start_offset + header.len();
+                            if let Some(end_offset) = content[start..].find(footer) {
+                                let end = start + end_offset;
+                                let base64_str = content[start..end].lines().map(|l| l.trim()).collect::<String>();
+                                if let Ok(der_bytes) = simple_base64_decode(&base64_str) {
+                                    let cert = rustls::pki_types::CertificateDer::from(der_bytes);
+                                    let _ = root_store.add(cert);
+                                }
+                                current_idx = end + footer.len();
+                            } else { break; }
+                        }
+                    }
+                }
+                
+                // REPLACEMENT: We bypass the system entirely because the system crashes in Termux.
+                let tls_config = rustls::ClientConfig::builder()
+                    .with_root_certificates(root_store)
+                    .with_no_client_auth();
+                builder = builder.use_preconfigured_tls(tls_config);
+            }
+            // --- BRANCH B: REAL APP MODE (Add, don't Replace) ---
+            else if let Ok(p) = env_var {
+                // We are NOT in Termux, but we have a custom cert.
+                // We want to KEEP the Android System certs and ADD this one.
+                println!("[Turbopack] Custom cert env var detected (Android App mode).");
+                
+                if let Ok(pem_bytes) = std::fs::read(&p) {
+                    let content = String::from_utf8_lossy(&pem_bytes);
+                    // ... (Reuse the same parsing logic) ...
+                    let header = "-----BEGIN CERTIFICATE-----";
+                    let footer = "-----END CERTIFICATE-----";
+                    let mut current_idx = 0;
+                    while let Some(start_offset) = content[current_idx..].find(header) {
+                        let start = current_idx + start_offset + header.len();
+                        if let Some(end_offset) = content[start..].find(footer) {
+                            let end = start + end_offset;
+                            let base64_str = content[start..end].lines().map(|l| l.trim()).collect::<String>();
+                            
+                            if let Ok(der_bytes) = simple_base64_decode(&base64_str) {
+                                // ADDITION: We use reqwest's API to add to the existing system list.
+                                if let Ok(cert) = reqwest::Certificate::from_der(&der_bytes) {
+                                    builder = builder.add_root_certificate(cert);
+                                }
+                            }
+                            current_idx = end + footer.len();
+                        } else { break; }
+                    }
+                }
+            }
+            // --- BRANCH C: STANDARD MODE ---
+            // No Termux, No Env Var. Do nothing. 
+            // reqwest will automatically use Android System Certs via JNI.
+        }
         builder.build()
     }
 }
@@ -120,6 +198,19 @@ impl FetchClientConfig {
         match response_result {
             Ok(resp) => Ok(Vc::cell(Ok(resp.resolved_cell()))),
             Err(err) => {
+
+                #[cfg(target_os = "android")]
+                {
+                    // --- DEBUGGING START ---
+                    eprintln!("\n[Turbopack] NETWORK ERROR DEBUG:");
+                    eprintln!("URL: {}", url_ref);
+                    eprintln!("Error: {:?}", err); // Prints the high level error
+                    if let Some(source) = std::error::Error::source(&err) {
+                        eprintln!("Caused by: {:?}", source); // Prints the deep TLS error
+                    }
+                    // --- DEBUGGING END ---
+                }
+                
                 // the client failed to construct or the HTTP request failed
                 mark_session_dependent();
                 Ok(Vc::cell(Err(
@@ -128,6 +219,33 @@ impl FetchClientConfig {
             }
         }
     }
+}
+
+
+#[cfg(target_os = "android")]
+fn simple_base64_decode(input: &str) -> Result<Vec<u8>, ()> {
+    let mut buffer = Vec::new();
+    let mut bits: u32 = 0;
+    let mut bit_count = 0;
+    for byte in input.bytes() {
+        let val = match byte {
+            b'A'..=b'Z' => byte - b'A',
+            b'a'..=b'z' => byte - b'a' + 26,
+            b'0'..=b'9' => byte - b'0' + 52,
+            b'+' => 62,
+            b'/' => 63,
+            b'=' => continue,
+            _ => continue,
+        };
+        bits = (bits << 6) | (val as u32);
+        bit_count += 6;
+        if bit_count >= 8 {
+            bit_count -= 8;
+            buffer.push((bits >> bit_count) as u8);
+            bits &= (1 << bit_count) - 1;
+        }
+    }
+    Ok(buffer)
 }
 
 #[doc(hidden)]

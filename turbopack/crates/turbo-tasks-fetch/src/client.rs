@@ -81,7 +81,7 @@ impl FetchClientConfig {
 
             // --- BRANCH A: TERMUX MODE (Fix the Crash) ---
             if termux_path.exists() {
-                println!("[Turbopack] Termux environment detected.");
+                //println!("[Turbopack] Termux environment detected.");
                 
                 let mut root_store = rustls::RootCertStore::empty();
                 let mut paths_to_load = vec![termux_path.to_path_buf()];
@@ -123,7 +123,7 @@ impl FetchClientConfig {
             else if let Ok(p) = env_var {
                 // We are NOT in Termux, but we have a custom cert.
                 // We want to KEEP the Android System certs and ADD this one.
-                println!("[Turbopack] Custom cert env var detected (Android App mode).");
+                //println!("[Turbopack] Custom cert env var detected (Android App mode).");
                 
                 if let Ok(pem_bytes) = std::fs::read(&p) {
                     let content = String::from_utf8_lossy(&pem_bytes);
@@ -199,17 +199,17 @@ impl FetchClientConfig {
             Ok(resp) => Ok(Vc::cell(Ok(resp.resolved_cell()))),
             Err(err) => {
 
-                #[cfg(target_os = "android")]
-                {
+                //#[cfg(target_os = "android")]
+                //{
                     // --- DEBUGGING START ---
-                    eprintln!("\n[Turbopack] NETWORK ERROR DEBUG:");
-                    eprintln!("URL: {}", url_ref);
-                    eprintln!("Error: {:?}", err); // Prints the high level error
-                    if let Some(source) = std::error::Error::source(&err) {
-                        eprintln!("Caused by: {:?}", source); // Prints the deep TLS error
-                    }
+                    //eprintln!("\n[Turbopack] NETWORK ERROR DEBUG:");
+                    //eprintln!("URL: {}", url_ref);
+                    //eprintln!("Error: {:?}", err); // Prints the high level error
+                    //if let Some(source) = std::error::Error::source(&err) {
+                    //    eprintln!("Caused by: {:?}", source); // Prints the deep TLS error
+                    //}
                     // --- DEBUGGING END ---
-                }
+                //}
                 
                 // the client failed to construct or the HTTP request failed
                 mark_session_dependent();

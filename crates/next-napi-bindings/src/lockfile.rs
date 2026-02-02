@@ -9,10 +9,6 @@ use anyhow::Context;
 use napi::bindgen_prelude::External;
 use napi_derive::napi;
 
-#[cfg(target_os = "android")]
-use fs2::FileExt;
-
-
 /// A wrapper around [`File`] that is passed to JS, and is set to `None` when [`lockfile_unlock`] is
 /// called.
 ///
@@ -109,10 +105,24 @@ pub fn lockfile_try_acquire_sync(
 
     #[cfg(target_os = "android")]
     return {
+        use std::io::{Seek, SeekFrom};
+        use fs2::FileExt;
+
+        let mut open_options = OpenOptions::new();
+        open_options.write(true).create(true).read(true);
+
         let file = open_options.open(&path)?;
 
         match file.try_lock_exclusive() {
             Ok(_) => {
+                file.set_len(0)?;
+                (&file).seek(SeekFrom::Start(0))?;
+                
+                if let Some(ref data) = content {
+                    (&file).write_all(data.as_bytes())?;
+                    (&file).flush()?;
+                }
+
                 Ok(Some(External::new(Mutex::new(ManuallyDrop::new(Some(
                     LockfileInner {
                         file,
@@ -120,7 +130,7 @@ pub fn lockfile_try_acquire_sync(
                     },
                 ))))))
             }
-            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
                 Ok(None)
             }
             Err(e) => {

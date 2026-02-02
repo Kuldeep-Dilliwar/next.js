@@ -55,8 +55,6 @@ ignored = [
 ]
 
 [dependencies]
-[target.'cfg(target_os = "android")'.dependencies]
-fs2 = "0.4"
 anyhow = { workspace = true }
 bincode = { workspace = true }
 console-subscriber = { workspace = true, optional = true }
@@ -101,6 +99,9 @@ swc_core = { workspace = true, features = [
     "ecma_utils",
     "ecma_visit",
 ] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+fs2 = "0.4"
 
 # Dependencies for the native, non-wasm32 build.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]

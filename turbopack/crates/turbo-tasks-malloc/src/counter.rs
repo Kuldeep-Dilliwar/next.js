@@ -137,6 +137,7 @@ struct CounterGuard(ThreadLocalCounter);
 #[cfg(target_os = "android")]
 impl Drop for CounterGuard {
     fn drop(&mut self) {
+        self.0.unload();
         unsafe {
             *IS_THREAD_EXITING_FLAG.get() = true;
         }

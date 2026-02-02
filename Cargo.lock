@@ -9442,6 +9442,7 @@ dependencies = [
  "futures",
  "hashbrown 0.14.5",
  "indexmap 2.9.0",
+ "indoc",
  "lmdb-rkv",
  "lzzzz",
  "once_cell",

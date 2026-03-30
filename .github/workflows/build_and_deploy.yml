@@ -327,7 +327,9 @@ jobs:
           node -v
           npm i -g "@napi-rs/cli@${NAPI_CLI_VERSION}"
           pnpm dlx turbo@${TURBO_VERSION} run ${{ matrix.build_task }} ${TURBO_ARGS} -- --target ${{ matrix.target }}
-          if [ "${{ matrix.os }}" != "windows" ]; then
+          if [ "${{ matrix.target }}" == "aarch64-linux-android" ]; then
+            $ANDROID_NDK_ROOT/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip -x packages/next-swc/native/next-swc.*.node
+          elif [ "${{ matrix.os }}" != "windows" ]; then
             strip -x packages/next-swc/native/next-swc.*.node
           fi
 

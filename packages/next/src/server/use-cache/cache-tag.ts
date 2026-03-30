@@ -15,9 +15,11 @@ export function cacheTag(...tags: string[]): void {
     case 'prerender-client':
     case 'validation-client':
     case 'prerender-runtime':
+    case 'prerender-ppr':
     case 'prerender-legacy':
     case 'request':
     case 'unstable-cache':
+    case 'generate-static-params':
     case undefined:
       throw new Error(
         '`cacheTag()` can only be called inside a "use cache" function.'

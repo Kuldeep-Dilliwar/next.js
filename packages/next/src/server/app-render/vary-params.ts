@@ -126,6 +126,7 @@ export function createVaryParamsAccumulator(): VaryParamsAccumulator | null {
         }
         return null
       }
+      case 'prerender-ppr':
       case 'prerender-legacy':
       case 'request':
       case 'cache':
@@ -133,6 +134,7 @@ export function createVaryParamsAccumulator(): VaryParamsAccumulator | null {
       case 'prerender-client':
       case 'validation-client':
       case 'unstable-cache':
+      case 'generate-static-params':
         break
       default:
         workUnitStore satisfies never
@@ -153,6 +155,7 @@ export function getMetadataVaryParamsAccumulator(): VaryParamsAccumulator | null
         }
         return null
       }
+      case 'prerender-ppr':
       case 'prerender-legacy':
       case 'request':
       case 'cache':
@@ -160,6 +163,7 @@ export function getMetadataVaryParamsAccumulator(): VaryParamsAccumulator | null
       case 'prerender-client':
       case 'validation-client':
       case 'unstable-cache':
+      case 'generate-static-params':
         return null
       default:
         workUnitStore satisfies never
@@ -199,6 +203,7 @@ export function getRootParamsVaryParamsAccumulator(): VaryParamsAccumulator | nu
         }
         return null
       }
+      case 'prerender-ppr':
       case 'prerender-legacy':
       case 'request':
       case 'cache':
@@ -206,6 +211,7 @@ export function getRootParamsVaryParamsAccumulator(): VaryParamsAccumulator | nu
       case 'prerender-client':
       case 'validation-client':
       case 'unstable-cache':
+      case 'generate-static-params':
         return null
       default:
         workUnitStore satisfies never

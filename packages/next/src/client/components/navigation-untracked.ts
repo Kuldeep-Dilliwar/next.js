@@ -20,17 +20,17 @@ function hasFallbackRouteParams(): boolean {
     switch (workUnitStore.type) {
       case 'prerender':
       case 'prerender-client':
+      case 'prerender-ppr':
+      case 'validation-client':
         const fallbackParams = workUnitStore.fallbackRouteParams
         return fallbackParams ? fallbackParams.size > 0 : false
-      case 'validation-client':
-        // TODO(instant-validation): in build, this depends on samples
-        return false
       case 'prerender-legacy':
       case 'request':
       case 'prerender-runtime':
       case 'cache':
       case 'private-cache':
       case 'unstable-cache':
+      case 'generate-static-params':
         break
       default:
         workUnitStore satisfies never

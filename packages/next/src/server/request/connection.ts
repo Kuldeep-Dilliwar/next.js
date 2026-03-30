@@ -4,6 +4,7 @@ import {
   workUnitAsyncStorage,
 } from '../app-render/work-unit-async-storage.external'
 import {
+  postponeWithTracking,
   throwToInterruptStaticGeneration,
   trackDynamicDataInDynamicRender,
 } from '../app-render/dynamic-rendering'
@@ -74,6 +75,10 @@ export function connection(): Promise<void> {
           throw new Error(
             `Route ${workStore.route} used \`connection()\` inside a function cached with \`unstable_cache()\`. The \`connection()\` function is used to indicate the subsequent code must only run when there is an actual Request, but caches must be able to be produced before a Request so this function is not allowed in this scope. See more info here: https://nextjs.org/docs/app/api-reference/functions/unstable_cache`
           )
+        case 'generate-static-params':
+          throw new Error(
+            `Route ${workStore.route} used \`connection()\` inside \`generateStaticParams\`. This is not supported because \`generateStaticParams\` runs at build time without an HTTP request. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context`
+          )
         case 'prerender':
         case 'prerender-client':
         case 'prerender-runtime':
@@ -92,6 +97,14 @@ export function connection(): Promise<void> {
             `${exportName} must not be used within a Client Component. Next.js should be preventing ${exportName} from being included in Client Components statically, but did not in this case.`
           )
         }
+        case 'prerender-ppr':
+          // We use React's postpone API to interrupt rendering here to create a
+          // dynamic hole
+          return postponeWithTracking(
+            workStore.route,
+            'connection',
+            workUnitStore.dynamicTracking
+          )
         case 'prerender-legacy':
           // We throw an error here to interrupt prerendering to mark the route
           // as dynamic

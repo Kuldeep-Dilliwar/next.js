@@ -798,6 +798,9 @@ export default class DevServer extends Server {
           distDir: this.distDir,
           pathname,
           config: {
+            pprConfig: this.nextConfig.experimental.ppr,
+            partialFallbacks:
+              this.nextConfig.experimental.partialFallbacks === true,
             configFileName,
             cacheComponents: Boolean(this.nextConfig.cacheComponents),
           },
@@ -908,6 +911,14 @@ export default class DevServer extends Server {
             existingManifest.routes[staticPath] = {} as any
           }
 
+          // Find the fallback route from the prerendered routes. This is
+          // the route whose pathname matches the page pattern (e.g.
+          // /dynamic-params/[slug]) and has fallback route params describing
+          // which params are unknown at build time.
+          const fallbackPrerenderedRoute = prerenderedRoutes?.find(
+            (route) => route.pathname === pathname
+          )
+
           existingManifest.dynamicRoutes[pathname] = {
             dataRoute: null,
             dataRouteRegex: null,
@@ -916,8 +927,8 @@ export default class DevServer extends Server {
             fallbackExpire: undefined,
             fallbackHeaders: undefined,
             fallbackStatus: undefined,
-            fallbackRootParams: undefined,
-            fallbackRouteParams: undefined,
+            fallbackRootParams: fallbackPrerenderedRoute?.fallbackRootParams,
+            fallbackRouteParams: fallbackPrerenderedRoute?.fallbackRouteParams,
             fallbackSourceRoute: pathname,
             prefetchDataRoute: undefined,
             prefetchDataRouteRegex: undefined,

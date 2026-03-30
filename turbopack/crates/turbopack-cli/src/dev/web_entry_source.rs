@@ -113,7 +113,7 @@ pub async fn create_web_entry_source(
     source_maps_type: SourceMapsType,
     browserslist_query: RcStr,
 ) -> Result<Vc<Box<dyn ContentSource>>> {
-    let compile_time_info = get_client_compile_time_info(browserslist_query, node_env);
+    let compile_time_info = get_client_compile_time_info(browserslist_query, node_env, true);
     let asset_context = get_client_asset_context(
         root_path.clone(),
         execution_context,
@@ -141,7 +141,7 @@ pub async fn create_web_entry_source(
             Ok(origin
                 .resolve_asset(request, origin.resolve_options(), ty)
                 .await?
-                .resolve()
+                .to_resolved()
                 .await?
                 .primary_modules()
                 .await?

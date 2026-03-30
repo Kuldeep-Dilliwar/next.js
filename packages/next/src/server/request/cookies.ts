@@ -16,6 +16,7 @@ import {
   isInEarlyRenderStage,
 } from '../app-render/work-unit-async-storage.external'
 import {
+  postponeWithTracking,
   throwToInterruptStaticGeneration,
   trackDynamicDataInDynamicRender,
 } from '../app-render/dynamic-rendering'
@@ -73,6 +74,10 @@ export function cookies(): Promise<ReadonlyRequestCookies> {
           throw new Error(
             `Route ${workStore.route} used \`cookies()\` inside a function cached with \`unstable_cache()\`. Accessing Dynamic data sources inside a cache scope is not supported. If you need this data inside a cached function use \`cookies()\` outside of the cached function and pass the required dynamic data in as an argument. See more info here: https://nextjs.org/docs/app/api-reference/functions/unstable_cache`
           )
+        case 'generate-static-params':
+          throw new Error(
+            `Route ${workStore.route} used \`cookies()\` inside \`generateStaticParams\`. This is not supported because \`generateStaticParams\` runs at build time without an HTTP request. Read more: https://nextjs.org/docs/messages/next-dynamic-api-wrong-context`
+          )
         case 'prerender':
           return makeHangingCookies(workStore, workUnitStore)
         case 'prerender-client':
@@ -80,6 +85,14 @@ export function cookies(): Promise<ReadonlyRequestCookies> {
           const exportName = '`cookies`'
           throw new InvariantError(
             `${exportName} must not be used within a Client Component. Next.js should be preventing ${exportName} from being included in Client Components statically, but did not in this case.`
+          )
+        case 'prerender-ppr':
+          // We need track dynamic access here eagerly to keep continuity with
+          // how cookies has worked in PPR without cacheComponents.
+          return postponeWithTracking(
+            workStore.route,
+            callingExpression,
+            workUnitStore.dynamicTracking
           )
         case 'prerender-legacy':
           // We track dynamic access here so we don't need to wrap the cookies

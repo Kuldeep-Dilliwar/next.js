@@ -5,14 +5,15 @@ import { z } from 'next/dist/compiled/zod'
 import type zod from 'next/dist/compiled/zod'
 
 import type { SizeLimit } from '../types'
-import type {
-  ExportPathMap,
-  TurbopackLoaderItem,
-  TurbopackOptions,
-  TurbopackRuleConfigItem,
-  TurbopackRuleConfigCollection,
-  TurbopackRuleCondition,
-  TurbopackLoaderBuiltinCondition,
+import {
+  LIGHTNINGCSS_FEATURE_NAMES,
+  type ExportPathMap,
+  type TurbopackLoaderItem,
+  type TurbopackOptions,
+  type TurbopackRuleConfigItem,
+  type TurbopackRuleConfigCollection,
+  type TurbopackRuleCondition,
+  type TurbopackLoaderBuiltinCondition,
 } from './config-shared'
 import type {
   Header,
@@ -40,6 +41,7 @@ const zExportMap: zod.ZodType<ExportPathMap> = z.record(
     _fallbackRouteParams: z.array(z.any()).optional(),
     _isAppDir: z.boolean().optional(),
     _isDynamicError: z.boolean().optional(),
+    _isRoutePPREnabled: z.boolean().optional(),
     _allowEmptyStaticShell: z.boolean().optional(),
   })
 )
@@ -186,7 +188,6 @@ const zTurbopackConfig: zod.ZodType<TurbopackOptions> = z.strictObject({
 })
 
 export const experimentalSchema = {
-  adapterPath: z.string().optional(),
   useSkewCookie: z.boolean().optional(),
   after: z.boolean().optional(),
   appNavFailHandling: z.boolean().optional(),
@@ -217,10 +218,21 @@ export const experimentalSchema = {
   craCompat: z.boolean().optional(),
   caseSensitiveRoutes: z.boolean().optional(),
   clientParamParsingOrigins: z.array(z.string()).optional(),
+  cachedNavigations: z.boolean().optional(),
+  partialFallbacks: z.boolean().optional(),
   dynamicOnHover: z.boolean().optional(),
+  useOffline: z.boolean().optional(),
   optimisticRouting: z.boolean().optional(),
   varyParams: z.boolean().optional(),
-  prefetchInlining: z.boolean().optional(),
+  prefetchInlining: z
+    .union([
+      z.boolean(),
+      z.object({
+        maxSize: z.number().optional(),
+        maxBundleSize: z.number().optional(),
+      }),
+    ])
+    .optional(),
   disableOptimizedLoading: z.boolean().optional(),
   disablePostcssPresetEnv: z.boolean().optional(),
   cacheComponents: z.boolean().optional(),
@@ -352,6 +364,12 @@ export const experimentalSchema = {
   serverSourceMaps: z.boolean().optional(),
   useWasmBinary: z.boolean().optional(),
   useLightningcss: z.boolean().optional(),
+  lightningCssFeatures: z
+    .object({
+      include: z.array(z.enum(LIGHTNINGCSS_FEATURE_NAMES)).optional(),
+      exclude: z.array(z.enum(LIGHTNINGCSS_FEATURE_NAMES)).optional(),
+    })
+    .optional(),
   testProxy: z.boolean().optional(),
   defaultTestRunner: z.enum(SUPPORTED_TEST_RUNNERS_LIST).optional(),
   allowDevelopmentBuild: z.literal(true).optional(),
@@ -364,6 +382,7 @@ export const experimentalSchema = {
   serverComponentsHmrCache: z.boolean().optional(),
   authInterrupts: z.boolean().optional(),
   useCache: z.boolean().optional(),
+  useNodeStreams: z.boolean().optional(),
   slowModuleDetection: z
     .object({
       buildTimeThresholdMs: z.number().int(),
@@ -386,7 +405,6 @@ export const experimentalSchema = {
   hideLogsAfterAbort: z.boolean().optional(),
   runtimeServerDeploymentId: z.boolean().optional(),
   immutableAssetToken: z.string().optional(),
-  devCacheControlNoCache: z.boolean().optional(),
   deferredEntries: z.array(z.string()).optional(),
   onBeforeDeferredEntries: z.function().returns(z.promise(z.void())).optional(),
   reportSystemEnvInlining: z.enum(['warn', 'error']).optional(),
@@ -394,6 +412,7 @@ export const experimentalSchema = {
 
 export const configSchema: zod.ZodType<NextConfig> = z.lazy(() =>
   z.strictObject({
+    adapterPath: z.string().optional(),
     allowedDevOrigins: z.array(z.string()).optional(),
     assetPrefix: z.string().optional(),
     basePath: z.string().optional(),

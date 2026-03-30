@@ -211,6 +211,9 @@ pub struct NapiProjectOptions {
 
     /// The version of Next.js that is running.
     pub next_version: RcStr,
+
+    /// Whether server-side HMR is enabled (disabled with --no-server-fast-refresh).
+    pub server_hmr: Option<bool>,
 }
 
 /// [NapiProjectOptions] with all fields optional.
@@ -281,6 +284,8 @@ pub struct NapiTurboEngineOptions {
     pub is_ci: Option<bool>,
     /// Whether the project is running in a short session.
     pub is_short_session: Option<bool>,
+    /// Whether to skip database compaction during shutdown.
+    pub skip_compaction: Option<bool>,
 }
 
 impl From<NapiWatchOptions> for WatchOptions {
@@ -318,6 +323,7 @@ impl From<NapiProjectOptions> for ProjectOptions {
             deferred_entries,
             is_persistent_caching_enabled,
             next_version,
+            server_hmr,
         } = val;
         ProjectOptions {
             root_path,
@@ -341,6 +347,7 @@ impl From<NapiProjectOptions> for ProjectOptions {
             deferred_entries,
             is_persistent_caching_enabled,
             next_version,
+            server_hmr: server_hmr.unwrap_or(false),
         }
     }
 }
@@ -416,7 +423,7 @@ pub fn project_new(
     turbo_engine_options: NapiTurboEngineOptions,
     napi_callbacks: NapiNextTurbopackCallbacksJsObject,
 ) -> napi::Result<JsObject> {
-    let napi_callbacks = NapiNextTurbopackCallbacks::from_js(napi_callbacks)?;
+    let napi_callbacks = NapiNextTurbopackCallbacks::from_js(&env, napi_callbacks)?;
     let (exit, exit_receiver) = ExitHandler::new_receiver();
 
     if let Some(dhat_profiler) = DhatProfilerGuard::try_init() {
@@ -534,6 +541,7 @@ pub fn project_new(
             let dependency_tracking = turbo_engine_options.dependency_tracking.unwrap_or(true);
             let is_ci = turbo_engine_options.is_ci.unwrap_or(false);
             let is_short_session = turbo_engine_options.is_short_session.unwrap_or(false);
+            let skip_compaction = turbo_engine_options.skip_compaction.unwrap_or(false);
             let turbo_tasks = create_turbo_tasks(
                 PathBuf::from(&options.dist_dir),
                 options.is_persistent_caching_enabled,
@@ -541,6 +549,7 @@ pub fn project_new(
                 dependency_tracking,
                 is_ci,
                 is_short_session,
+                skip_compaction,
             )?;
             let turbopack_ctx = NextTurbopackContext::new(turbo_tasks.clone(), napi_callbacks);
 
@@ -777,7 +786,7 @@ pub struct AppPageNapiRoute {
 #[derive(Default)]
 pub struct NapiRoute {
     /// The router path
-    pub pathname: String,
+    pub pathname: RcStr,
     /// The relative path from project_path to the route file
     pub original_name: Option<RcStr>,
 
@@ -795,7 +804,7 @@ pub struct NapiRoute {
 
 impl NapiRoute {
     fn from_route(
-        pathname: String,
+        pathname: RcStr,
         value: RouteOperation,
         turbopack_ctx: &NextTurbopackContext,
     ) -> Self {
@@ -919,7 +928,7 @@ impl NapiEntrypoints {
         let routes = entrypoints
             .routes
             .iter()
-            .map(|(k, v)| NapiRoute::from_route(k.to_string(), v.clone(), turbopack_ctx))
+            .map(|(k, v)| NapiRoute::from_route(k.clone(), v.clone(), turbopack_ctx))
             .collect();
         let middleware = entrypoints
             .middleware
@@ -2147,6 +2156,16 @@ pub fn project_compilation_events_subscribe(
                 break;
             }
         }
+        // Signal the JS side that the subscription has ended (e.g. after
+        // project shutdown drops all senders).  This allows the async
+        // iterator to exit promptly instead of hanging forever.
+        let _ = tsfn.call(
+            Err(napi::Error::new(
+                Status::Cancelled,
+                "compilation events subscription closed",
+            )),
+            ThreadsafeFunctionCallMode::Blocking,
+        );
     });
 
     Ok(())
@@ -2475,4 +2494,16 @@ pub async fn project_write_analyze_data(
             .map(|d| NapiDiagnostic::from(d))
             .collect(),
     })
+}
+
+/// Opens the Turbopack persistent cache database at the given path and performs a full compaction.
+///
+/// The `path` should point to the `<distDir>/cache/turbopack` directory.
+#[napi]
+pub async fn turbopack_database_compact(path: String) -> napi::Result<()> {
+    let version_info = crate::next_api::turbopack_ctx::git_version_info();
+    let is_ci = std::env::var("CI").is_ok_and(|v| !v.is_empty());
+    turbo_tasks_backend::compact_database(&PathBuf::from(path), &version_info, is_ci)
+        .map_err(|e| napi::Error::from_reason(format!("Database compaction failed: {e}")))?;
+    Ok(())
 }

@@ -148,6 +148,7 @@ export function unstable_cache<T extends Callback>(
           workUnitStore &&
           workStore &&
           getDraftModeProviderForCacheScope(workStore, workUnitStore),
+        rootParams: undefined,
       }
 
       if (workStore) {
@@ -165,6 +166,7 @@ export function unstable_cache<T extends Callback>(
             case 'private-cache':
             case 'prerender':
             case 'prerender-runtime':
+            case 'prerender-ppr':
             case 'prerender-legacy':
               // We update the store's revalidate property if the option.revalidate is a higher precedence
               // options.revalidate === undefined doesn't affect timing.
@@ -196,6 +198,7 @@ export function unstable_cache<T extends Callback>(
             case 'prerender-client':
             case 'validation-client':
             case 'request':
+            case 'generate-static-params':
               break
             default:
               workUnitStore satisfies never
@@ -411,10 +414,12 @@ function getFetchUrlPrefix(
     case 'prerender-client':
     case 'validation-client':
     case 'prerender-runtime':
+    case 'prerender-ppr':
     case 'prerender-legacy':
     case 'cache':
     case 'private-cache':
     case 'unstable-cache':
+    case 'generate-static-params':
       return workStore.route
     default:
       return workUnitStore satisfies never

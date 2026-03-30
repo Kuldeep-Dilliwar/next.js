@@ -10,14 +10,21 @@ import {
 } from '../app-render/vary-params'
 
 import { ReflectAdapter } from '../web/spec-extension/adapters/reflect'
+import {
+  throwToInterruptStaticGeneration,
+  postponeWithTracking,
+} from '../app-render/dynamic-rendering'
 
 import {
   workUnitAsyncStorage,
+  type PrerenderStorePPR,
+  type PrerenderStoreLegacy,
   type StaticPrerenderStoreModern,
   type StaticPrerenderStore,
   throwInvariantForMissingStore,
   type PrerenderStoreModernRuntime,
   type RequestStore,
+  type ValidationStoreClient,
 } from '../app-render/work-unit-async-storage.external'
 import { InvariantError } from '../../shared/lib/invariant-error'
 import {
@@ -47,6 +54,7 @@ export function createParamsFromClient(
     switch (workUnitStore.type) {
       case 'prerender':
       case 'prerender-client':
+      case 'prerender-ppr':
       case 'prerender-legacy':
         // Client params don't need additional vary tracking because by the
         // time they reach the client, the access would have already been
@@ -60,8 +68,11 @@ export function createParamsFromClient(
           varyParamsAccumulator
         )
       case 'validation-client':
-        // TODO(instant-validation): in build, this depends on samples
-        return createRenderParamsInProd(underlyingParams)
+        return createClientParamsInInstantValidation(
+          underlyingParams,
+          workStore,
+          workUnitStore.validationSamples
+        )
       case 'cache':
       case 'private-cache':
       case 'unstable-cache':
@@ -71,6 +82,10 @@ export function createParamsFromClient(
       case 'prerender-runtime':
         throw new InvariantError(
           'createParamsFromClient should not be called in a runtime prerender.'
+        )
+      case 'generate-static-params':
+        throw new InvariantError(
+          'createParamsFromClient should not be called inside generateStaticParams.'
         )
       case 'request':
         if (process.env.NODE_ENV === 'development') {
@@ -86,6 +101,12 @@ export function createParamsFromClient(
             workStore,
             workUnitStore,
             isRuntimePrefetchable
+          )
+        } else if (workUnitStore.validationSamples) {
+          return createClientParamsInInstantValidation(
+            underlyingParams,
+            workStore,
+            workUnitStore.validationSamples
           )
         } else {
           return createRenderParamsInProd(underlyingParams)
@@ -126,6 +147,7 @@ export function createServerParamsForRoute(
   if (workUnitStore) {
     switch (workUnitStore.type) {
       case 'prerender':
+      case 'prerender-ppr':
       case 'prerender-legacy':
         return createStaticPrerenderParams(
           underlyingParams,
@@ -144,6 +166,10 @@ export function createServerParamsForRoute(
       case 'unstable-cache':
         throw new InvariantError(
           'createServerParamsForRoute should not be called in cache contexts.'
+        )
+      case 'generate-static-params':
+        throw new InvariantError(
+          'createServerParamsForRoute should not be called inside generateStaticParams.'
         )
       case 'prerender-runtime': {
         // Route params are not runtime prefetchable
@@ -196,6 +222,7 @@ export function createServerParamsForServerSegment(
     switch (workUnitStore.type) {
       case 'prerender':
       case 'prerender-client':
+      case 'prerender-ppr':
       case 'prerender-legacy':
         return createStaticPrerenderParams(
           underlyingParams,
@@ -205,13 +232,18 @@ export function createServerParamsForServerSegment(
           varyParamsAccumulator
         )
       case 'validation-client':
-        // TODO(instant-validation): in build, this depends on samples
-        return createRenderParamsInProd(underlyingParams)
+        throw new InvariantError(
+          'createServerParamsForServerSegment should not be called in client contexts.'
+        )
       case 'cache':
       case 'private-cache':
       case 'unstable-cache':
         throw new InvariantError(
           'createServerParamsForServerSegment should not be called in cache contexts.'
+        )
+      case 'generate-static-params':
+        throw new InvariantError(
+          'createServerParamsForServerSegment should not be called inside generateStaticParams.'
         )
       case 'prerender-runtime':
         return createRuntimePrerenderParams(
@@ -232,6 +264,17 @@ export function createServerParamsForServerSegment(
             fallbackParams,
             workStore,
             workUnitStore,
+            isRuntimePrefetchable
+          )
+        } else if (
+          workUnitStore.asyncApiPromises &&
+          workUnitStore.validationSamples
+        ) {
+          return createServerParamsInInstantValidation(
+            underlyingParams,
+            workStore,
+            workUnitStore.validationSamples,
+            workUnitStore.asyncApiPromises,
             isRuntimePrefetchable
           )
         } else if (
@@ -286,7 +329,9 @@ export function createPrerenderParamsForClientSegment(
         }
         break
       case 'validation-client':
-        // TODO(instant-validation): in build, this depends on samples
+        throw new InvariantError(
+          'createPrerenderParamsForClientSegment should not be called in validation contexts.'
+        )
         break
       case 'cache':
       case 'private-cache':
@@ -294,6 +339,11 @@ export function createPrerenderParamsForClientSegment(
         throw new InvariantError(
           'createPrerenderParamsForClientSegment should not be called in cache contexts.'
         )
+      case 'generate-static-params':
+        throw new InvariantError(
+          'createPrerenderParamsForClientSegment should not be called inside generateStaticParams.'
+        )
+      case 'prerender-ppr':
       case 'prerender-legacy':
       case 'prerender-runtime':
       case 'request':
@@ -337,6 +387,22 @@ function createStaticPrerenderParams(
             // resolves.
             return makeHangingParams(
               underlyingParamsWithVarying,
+              workStore,
+              prerenderStore
+            )
+          }
+        }
+      }
+      break
+    }
+    case 'prerender-ppr': {
+      const fallbackParams = prerenderStore.fallbackRouteParams
+      if (fallbackParams) {
+        for (const key in underlyingParams) {
+          if (fallbackParams.has(key)) {
+            return makeErroringParams(
+              underlyingParamsWithVarying,
+              fallbackParams,
               workStore,
               prerenderStore
             )
@@ -393,6 +459,44 @@ function hasFallbackRouteParams(
     }
   }
   return false
+}
+
+function createServerParamsInInstantValidation(
+  underlyingParams: Params,
+  workStore: WorkStore,
+  validationSamples: NonNullable<RequestStore['validationSamples']>,
+  asyncApiPromises: NonNullable<RequestStore['asyncApiPromises']>,
+  isRuntimePrefetchable: boolean
+): Promise<Params> {
+  const { createExhaustiveParamsProxy } =
+    require('../app-render/instant-validation/instant-samples') as typeof import('../app-render/instant-validation/instant-samples')
+  const declaredParams = new Set(Object.keys(validationSamples.params ?? {}))
+  const proxiedUnderlying = createExhaustiveParamsProxy(
+    underlyingParams,
+    declaredParams,
+    workStore.route
+  )
+  return (
+    isRuntimePrefetchable
+      ? asyncApiPromises.earlySharedParamsParent
+      : asyncApiPromises.sharedParamsParent
+  ).then(() => proxiedUnderlying)
+}
+
+function createClientParamsInInstantValidation(
+  underlyingParams: Params,
+  workStore: WorkStore,
+  validationSamples: ValidationStoreClient['validationSamples']
+): Promise<Params> {
+  const { createExhaustiveParamsProxy } =
+    require('../app-render/instant-validation/instant-samples') as typeof import('../app-render/instant-validation/instant-samples')
+  const declaredParams = new Set(Object.keys(validationSamples?.params ?? {}))
+  const proxiedUnderlying = createExhaustiveParamsProxy(
+    underlyingParams,
+    declaredParams,
+    workStore.route
+  )
+  return Promise.resolve(proxiedUnderlying)
 }
 
 function createRenderParamsInProd(underlyingParams: Params): Promise<Params> {
@@ -465,6 +569,65 @@ function makeHangingParams(
   )
 
   CachedParams.set(underlyingParams, promise)
+
+  return promise
+}
+
+function makeErroringParams(
+  underlyingParams: Params,
+  fallbackParams: OpaqueFallbackRouteParams,
+  workStore: WorkStore,
+  prerenderStore: PrerenderStorePPR | PrerenderStoreLegacy
+): Promise<Params> {
+  const cachedParams = CachedParams.get(underlyingParams)
+  if (cachedParams) {
+    return cachedParams
+  }
+
+  const augmentedUnderlying = { ...underlyingParams }
+
+  // We don't use makeResolvedReactPromise here because params
+  // supports copying with spread and we don't want to unnecessarily
+  // instrument the promise with spreadable properties of ReactPromise.
+  const promise = Promise.resolve(augmentedUnderlying)
+  CachedParams.set(underlyingParams, promise)
+
+  Object.keys(underlyingParams).forEach((prop) => {
+    if (wellKnownProperties.has(prop)) {
+      // These properties cannot be shadowed because they need to be the
+      // true underlying value for Promises to work correctly at runtime
+    } else {
+      if (fallbackParams.has(prop)) {
+        Object.defineProperty(augmentedUnderlying, prop, {
+          get() {
+            const expression = describeStringPropertyAccess('params', prop)
+            // In most dynamic APIs we also throw if `dynamic = "error"` however
+            // for params is only dynamic when we're generating a fallback shell
+            // and even when `dynamic = "error"` we still support generating dynamic
+            // fallback shells
+            // TODO remove this comment when cacheComponents is the default since there
+            // will be no `dynamic = "error"`
+            if (prerenderStore.type === 'prerender-ppr') {
+              // PPR Prerender (no cacheComponents)
+              postponeWithTracking(
+                workStore.route,
+                expression,
+                prerenderStore.dynamicTracking
+              )
+            } else {
+              // Legacy Prerender
+              throwToInterruptStaticGeneration(
+                expression,
+                workStore,
+                prerenderStore
+              )
+            }
+          },
+          enumerable: true,
+        })
+      }
+    }
+  })
 
   return promise
 }

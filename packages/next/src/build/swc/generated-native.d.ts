@@ -18,6 +18,7 @@ export function lightningCssTransform(args: object): Promise<unknown>
 export function lightningCssTransformStyleAttribute(
   args: object
 ): Promise<unknown>
+export function lightningcssFeatureNamesToMaskNapi(names: Array<string>): number
 
 // GENERATED-TYPES-BELOW
 // DO NOT MANUALLY EDIT THESE TYPES
@@ -110,6 +111,14 @@ export declare function codeFrameColumns(
   location: NapiCodeFrameLocation,
   options?: NapiCodeFrameOptions | undefined | null
 ): string | null
+/**
+ * Convert an array of dash-case feature name strings to a lightningcss
+ * `Features` bitmask (u32). Called from the webpack lightningcss-loader to
+ * avoid duplicating the name-to-bit mapping in JavaScript.
+ */
+export declare function lightningcssFeatureNamesToMaskNapi(
+  names: Array<string>
+): number
 export declare function lockfileTryAcquireSync(
   path: string,
   content?: string | undefined | null
@@ -247,6 +256,8 @@ export interface NapiProjectOptions {
   isPersistentCachingEnabled: boolean
   /** The version of Next.js that is running. */
   nextVersion: RcStr
+  /** Whether server-side HMR is enabled (disabled with --no-server-fast-refresh). */
+  serverHmr?: boolean
 }
 /** [NapiProjectOptions] with all fields optional. */
 export interface NapiPartialProjectOptions {
@@ -306,6 +317,8 @@ export interface NapiTurboEngineOptions {
   isCi?: boolean
   /** Whether the project is running in a short session. */
   isShortSession?: boolean
+  /** Whether to skip database compaction during shutdown. */
+  skipCompaction?: boolean
 }
 export declare function projectNew(
   options: NapiProjectOptions,
@@ -471,6 +484,12 @@ export declare function projectWriteAnalyzeData(
   appDirOnly: boolean
 ): Promise<TurbopackResult>
 /**
+ * Opens the Turbopack persistent cache database at the given path and performs a full compaction.
+ *
+ * The `path` should point to the `<distDir>/cache/turbopack` directory.
+ */
+export declare function turbopackDatabaseCompact(path: string): Promise<void>
+/**
  * A version of [`NapiNextTurbopackCallbacks`] that can accepted as an argument to a napi function.
  *
  * This can be converted into a [`NapiNextTurbopackCallbacks`] with
@@ -508,8 +527,20 @@ export interface NapiIssue {
   description?: any
   detail?: any
   source?: NapiIssueSource
+  additionalSources: Array<NapiAdditionalIssueSource>
   documentationLink: string
   importTraces: any
+  /**
+   * Pre-rendered code frame for the issue's source location, if available.
+   * Rendered in Rust to avoid transferring full source file content to JS.
+   */
+  codeFrame?: string
+}
+export interface NapiAdditionalIssueSource {
+  description: string
+  source: NapiIssueSource
+  /** Pre-rendered code frame for this additional source location, if available. */
+  codeFrame?: string
 }
 export interface NapiIssueSource {
   source: NapiSource
@@ -521,7 +552,7 @@ export interface NapiIssueSourceRange {
 }
 export interface NapiSource {
   ident: string
-  content?: string
+  filePath: string
 }
 export interface NapiSourcePos {
   line: number

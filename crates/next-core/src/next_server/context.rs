@@ -446,13 +446,21 @@ pub async fn get_server_module_options_context(
 
     let foreign_code_context_condition =
         foreign_code_context_condition(next_config, project_path.clone()).await?;
+    let local_postcss_config = *next_config
+        .experimental_turbopack_local_postcss_config()
+        .await?;
+    let postcss_config_location = if local_postcss_config == Some(true) {
+        PostCssConfigLocation::LocalPathOrProjectPath
+    } else {
+        PostCssConfigLocation::ProjectPathOrLocalPath
+    };
     let postcss_transform_options = PostCssTransformOptions {
         postcss_package: Some(
             get_postcss_package_mapping(project_path.clone())
                 .to_resolved()
                 .await?,
         ),
-        config_location: PostCssConfigLocation::ProjectPathOrLocalPath,
+        config_location: postcss_config_location,
         ..Default::default()
     };
     let postcss_foreign_transform_options = PostCssTransformOptions {
@@ -1002,8 +1010,10 @@ pub struct ServerChunkingContextOptions {
     pub nested_async_chunking: Vc<bool>,
     pub debug_ids: Vc<bool>,
     pub client_root: FileSystemPath,
+    pub client_static_folder_name: RcStr,
     pub asset_prefix: RcStr,
     pub css_url_suffix: Vc<Option<RcStr>>,
+    pub hash_salt: ResolvedVc<RcStr>,
 }
 
 /// Like `get_server_chunking_context` but all assets are emitted as client assets (so `/_next`)
@@ -1027,8 +1037,10 @@ pub async fn get_server_chunking_context_with_client_assets(
         nested_async_chunking,
         debug_ids,
         client_root,
+        client_static_folder_name,
         asset_prefix,
         css_url_suffix,
+        hash_salt,
     } = options;
     let css_url_suffix = css_url_suffix.to_resolved().await?;
 
@@ -1042,7 +1054,9 @@ pub async fn get_server_chunking_context_with_client_assets(
         node_root_to_root_path,
         client_root.clone(),
         node_root.join("server/chunks/ssr")?,
-        client_root.join("static/media")?,
+        client_root
+            .join(&client_static_folder_name)?
+            .join("media")?,
         environment.to_resolved().await?,
         next_mode.runtime_type(),
     )
@@ -1072,6 +1086,7 @@ pub async fn get_server_chunking_context_with_client_assets(
     .unused_references(unused_references.to_resolved().await?)
     .file_tracing(next_mode.is_production())
     .debug_ids(*debug_ids.await?)
+    .hash_salt(hash_salt)
     .nested_async_availability(*nested_async_chunking.await?)
     .worker_forwarded_globals(worker_forwarded_globals());
 
@@ -1125,8 +1140,10 @@ pub async fn get_server_chunking_context(
         nested_async_chunking,
         debug_ids,
         client_root,
+        client_static_folder_name,
         asset_prefix,
         css_url_suffix,
+        hash_salt,
     } = options;
     let css_url_suffix = css_url_suffix.to_resolved().await?;
     let next_mode = mode.await?;
@@ -1144,7 +1161,12 @@ pub async fn get_server_chunking_context(
         next_mode.runtime_type(),
     )
     .client_roots_override(rcstr!("client"), client_root.clone())
-    .asset_root_path_override(rcstr!("client"), client_root.join("static/media")?)
+    .asset_root_path_override(
+        rcstr!("client"),
+        client_root
+            .join(&client_static_folder_name)?
+            .join("media")?,
+    )
     .asset_prefix_override(rcstr!("client"), asset_prefix)
     .url_behavior_override(
         rcstr!("client"),
@@ -1170,6 +1192,7 @@ pub async fn get_server_chunking_context(
     .unused_references(unused_references.to_resolved().await?)
     .file_tracing(next_mode.is_production())
     .debug_ids(*debug_ids.await?)
+    .hash_salt(hash_salt)
     .nested_async_availability(*nested_async_chunking.await?)
     .worker_forwarded_globals(worker_forwarded_globals());
 

@@ -1808,6 +1808,10 @@ impl JsValue {
                         "The dynamic import() method from the ESM specification: https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Statements/import#dynamic_imports"
                     ),
                     WellKnownFunctionKind::Require => ("require".to_string(), "The require method from CommonJS"),
+                    WellKnownFunctionKind::RequireFrom(rel) => (
+                        format!("createRequire('{rel}')"),
+                        "The return value of Node.js module.createRequire: https://nodejs.org/api/module.html#modulecreaterequirefilename"
+                    ),
                     WellKnownFunctionKind::RequireResolve => ("require.resolve".to_string(), "The require.resolve method from CommonJS"),
                     WellKnownFunctionKind::RequireContext => ("require.context".to_string(), "The require.context method from webpack"),
                     WellKnownFunctionKind::RequireContextRequire(..) => ("require.context(...)".to_string(), "The require.context(...) method from webpack: https://webpack.js.org/api/module-methods/#requirecontext"),
@@ -1817,6 +1821,10 @@ impl JsValue {
                     WellKnownFunctionKind::FsReadMethod(name) => (
                         format!("fs.{name}"),
                         "A file reading method from the Node.js fs module: https://nodejs.org/api/fs.html",
+                    ),
+                    WellKnownFunctionKind::FsReadDir => (
+                        "fs.readdir".to_string(),
+                        "The Node.js fs.readdir method: https://nodejs.org/api/fs.html",
                     ),
                     WellKnownFunctionKind::PathToFileUrl => (
                         "url.pathToFileURL".to_string(),
@@ -1909,6 +1917,10 @@ impl JsValue {
                     WellKnownFunctionKind::ModuleHotDecline => (
                       "module.hot.decline".to_string(),
                       "The module.hot.decline HMR API: https://webpack.js.org/api/hot-module-replacement/#decline"
+                    ),
+                    WellKnownFunctionKind::ImportMetaGlob => (
+                      "import.meta.glob".to_string(),
+                      "The import.meta.glob() function from Vite: https://vite.dev/guide/features.html#glob-import"
                     ),
                 };
                 if depth > 0 {
@@ -3026,7 +3038,7 @@ impl JsValue {
                     self.update_total_nodes();
                 }
             }
-            JsValue::Logical(_, op, list) => {
+            JsValue::Logical(_, op, list)
                 // Nested logical expressions can be normalized: e. g. `a && (b && c)` => `a &&
                 // b && c`
                 if list.iter().any(|v| {
@@ -3035,7 +3047,7 @@ impl JsValue {
                     } else {
                         false
                     }
-                }) {
+                }) => {
                     // Taking the old list and constructing a new merged list
                     for mut v in take(list).into_iter() {
                         if let JsValue::Logical(_, inner_op, inner_list) = &mut v {
@@ -3050,7 +3062,6 @@ impl JsValue {
                     }
                     self.update_total_nodes();
                 }
-            }
             _ => {}
         }
     }
@@ -3477,6 +3488,8 @@ pub enum WellKnownFunctionKind {
     PathResolve(Box<JsValue>),
     Import,
     Require,
+    /// `0` is the path to resolve from (relative to the current module).
+    RequireFrom(Box<ConstantString>),
     RequireResolve,
     RequireContext,
     RequireContextRequire(RequireContextValue),
@@ -3484,6 +3497,7 @@ pub enum WellKnownFunctionKind {
     RequireContextRequireResolve(RequireContextValue),
     Define,
     FsReadMethod(Atom),
+    FsReadDir,
     PathToFileUrl,
     CreateRequire,
     ChildProcessSpawnMethod(Atom),
@@ -3510,6 +3524,8 @@ pub enum WellKnownFunctionKind {
     ModuleHotAccept,
     /// `module.hot.decline(deps)` — decline HMR updates for dependencies.
     ModuleHotDecline,
+    /// `import.meta.glob(patterns, options?)` — Vite-compatible glob import.
+    ImportMetaGlob,
 }
 
 impl WellKnownFunctionKind {
@@ -3606,6 +3622,11 @@ pub mod test_utils {
                 JsValue::Constant(v) => (v.to_string() + "/resolved/lib/index.js").into(),
                 _ => v.into_unknown(true, "require.resolve non constant"),
             },
+            JsValue::Call(
+                _,
+                box JsValue::WellKnownFunction(WellKnownFunctionKind::ImportMetaGlob),
+                _,
+            ) => v.into_unknown(false, "import.meta.glob()"),
             JsValue::Call(
                 _,
                 box JsValue::WellKnownFunction(WellKnownFunctionKind::RequireContext),

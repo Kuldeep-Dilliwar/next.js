@@ -262,7 +262,7 @@ jobs:
       - name: normalize versions
         run: node scripts/normalize-version-bump.js
 
-- name: Setup toolchain
+      - name: Setup toolchain
         run: ${{ matrix.setup }}
         if: ${{ matrix.setup }}
 
